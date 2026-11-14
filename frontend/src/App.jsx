@@ -97,12 +97,220 @@ function DeviceDetails({ node }) {
   );
 }
 
+function ChannelsPanel({ channels, connected }) {
+  return (
+    <section className="panel supporting-panel" aria-labelledby="channels-heading">
+      <div className="supporting-heading">
+        <div>
+          <p className="eyebrow">NETWORK</p>
+          <h2 id="channels-heading">Mesh channels</h2>
+        </div>
+        <span className="channel-count">{channels.length}</span>
+      </div>
+
+      {channels.length > 0 ? (
+        <ul className="channel-list">
+          {channels.map((channel) => (
+            <li className="channel-item" key={channel.index}>
+              <span className="channel-index">
+                {String(channel.index).padStart(2, "0")}
+              </span>
+              <span className="channel-copy">
+                <strong>{channel.name || `Channel ${channel.index}`}</strong>
+                <span>{channel.roleName || "Unknown role"}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="supporting-empty">
+          {connected
+            ? "Channel details will appear after the node finishes configuring."
+            : "Connect a serial device to load this node's channels."}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function AdditionalDataPanel() {
+  return (
+    <section className="panel supporting-panel future-panel" aria-labelledby="future-heading">
+      <div className="supporting-heading">
+        <div>
+          <p className="eyebrow">EXTENSIBLE</p>
+          <h2 id="future-heading">Additional data</h2>
+        </div>
+        <span className="future-badge">FUTURE</span>
+      </div>
+      <div className="future-placeholder">
+        <span className="future-mark" aria-hidden="true">+</span>
+        <p>Reserved for more node telemetry and tools.</p>
+      </div>
+    </section>
+  );
+}
+
+const beaconFieldOptions = [
+  { key: "name", label: "Node name" },
+  { key: "id", label: "Node ID" },
+  { key: "hardware", label: "Hardware" },
+  { key: "firmware", label: "Firmware" },
+];
+
+const beaconIntervalOptions = [
+  { value: 1, label: "Every minute" },
+  { value: 5, label: "Every 5 minutes" },
+  { value: 15, label: "Every 15 minutes" },
+  { value: 30, label: "Every 30 minutes" },
+];
+
+function BeaconPanel({
+  channels,
+  activeBeacon,
+  connected,
+  hasNodeInfo,
+  channelIndex,
+  intervalMinutes,
+  include,
+  busy,
+  onChannelChange,
+  onIntervalChange,
+  onIncludeChange,
+  onStart,
+  onStop,
+}) {
+  const activeChannel = channels.find(
+    (channel) => channel.index === activeBeacon.channelIndex,
+  );
+  const hasIncludedFields = beaconFieldOptions.some(({ key }) => include[key]);
+
+  return (
+    <section className="panel supporting-panel beacon-panel" aria-labelledby="beacon-heading">
+      <div className="supporting-heading">
+        <div>
+          <p className="eyebrow">ANNOUNCEMENTS</p>
+          <h2 id="beacon-heading">Node beacon</h2>
+        </div>
+        <span className={`beacon-state ${activeBeacon.active ? "is-active" : ""}`}>
+          <span className="indicator-dot" />
+          {activeBeacon.active ? "Active" : "Stopped"}
+        </span>
+      </div>
+
+      <p className="beacon-description">
+        Broadcast a node summary now, then repeat on the selected channel and interval.
+      </p>
+
+      <div className="beacon-selects">
+        <label className="beacon-field">
+          <span className="field-label">Mesh channel</span>
+          <select
+            value={activeBeacon.active ? String(activeBeacon.channelIndex) : channelIndex}
+            onChange={(event) => onChannelChange(event.target.value)}
+            disabled={activeBeacon.active || busy || channels.length === 0}
+          >
+            {channels.length === 0 ? (
+              <option value="">No enabled channels</option>
+            ) : (
+              channels.map((channel) => (
+                <option value={String(channel.index)} key={channel.index}>
+                  {channel.name || `Channel ${channel.index}`} · {channel.roleName}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+
+        <label className="beacon-field">
+          <span className="field-label">Repeat interval</span>
+          <select
+            value={String(activeBeacon.active ? activeBeacon.intervalMinutes : intervalMinutes)}
+            onChange={(event) => onIntervalChange(Number(event.target.value))}
+            disabled={activeBeacon.active || busy}
+          >
+            {beaconIntervalOptions.map((option) => (
+              <option value={option.value} key={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <fieldset className="beacon-fields" disabled={activeBeacon.active || busy}>
+        <legend>Include in beacon</legend>
+        {beaconFieldOptions.map(({ key, label }) => (
+          <label className="beacon-checkbox" key={key}>
+            <input
+              type="checkbox"
+              checked={include[key]}
+              onChange={(event) => onIncludeChange(key, event.target.checked)}
+            />
+            <span>{label}</span>
+          </label>
+        ))}
+      </fieldset>
+
+      <div className="beacon-actions">
+        {activeBeacon.active ? (
+          <button
+            className="button button-danger"
+            onClick={onStop}
+            disabled={busy}
+            type="button"
+          >
+            {busy ? "Stopping…" : "Stop beaconing"}
+          </button>
+        ) : (
+          <button
+            className="button button-primary"
+            onClick={onStart}
+            disabled={
+              !connected || !hasNodeInfo || !channelIndex || !hasIncludedFields || busy
+            }
+            type="button"
+          >
+            {busy ? "Starting…" : "Start beaconing"}
+          </button>
+        )}
+        {activeBeacon.active && activeChannel && (
+          <span className="beacon-active-channel">
+            {activeChannel.name || `Channel ${activeChannel.index}`}
+          </span>
+        )}
+      </div>
+
+      {activeBeacon.lastSentAt && (
+        <p className="beacon-last-sent">
+          Last sent {new Date(activeBeacon.lastSentAt).toLocaleTimeString()}
+        </p>
+      )}
+      {activeBeacon.lastMessage && (
+        <p className="beacon-message">{activeBeacon.lastMessage}</p>
+      )}
+      {activeBeacon.lastError && (
+        <p className="beacon-error" role="status">{activeBeacon.lastError}</p>
+      )}
+    </section>
+  );
+}
+
 export default function App() {
   const [devices, setDevices] = useState([]);
   const [selectedPath, setSelectedPath] = useState("");
   const [self, setSelf] = useState(null);
   const [apiOnline, setApiOnline] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [beaconBusy, setBeaconBusy] = useState(false);
+  const [beaconChannelIndex, setBeaconChannelIndex] = useState("");
+  const [beaconIntervalMinutes, setBeaconIntervalMinutes] = useState(1);
+  const [beaconInclude, setBeaconInclude] = useState({
+    name: true,
+    id: true,
+    hardware: true,
+    firmware: true,
+  });
   const [refreshingDevices, setRefreshingDevices] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -176,6 +384,52 @@ export default function App() {
   }, []);
 
   const statusLabel = self?.status ?? "waiting for API";
+  const node = self?.node;
+  const channels = node?.channels ?? [];
+  const beaconChannels = channels.filter((channel) => channel.role !== 0);
+  const activeBeacon = self?.beacon ?? { active: false, channelIndex: null };
+
+  useEffect(() => {
+    if (activeBeacon.active) {
+      return;
+    }
+    setBeaconChannelIndex((currentIndex) => {
+      if (beaconChannels.some((channel) => String(channel.index) === currentIndex)) {
+        return currentIndex;
+      }
+      return beaconChannels.length > 0 ? String(beaconChannels[0].index) : "";
+    });
+  }, [beaconChannels, activeBeacon.active]);
+
+  useEffect(() => {
+    if (!activeBeacon.active) {
+      return;
+    }
+    setBeaconChannelIndex(String(activeBeacon.channelIndex));
+    setBeaconIntervalMinutes(activeBeacon.intervalMinutes);
+    setBeaconInclude((currentInclude) => {
+      const activeInclude = activeBeacon.include ?? {};
+      if (
+        beaconFieldOptions.every(
+          ({ key }) => currentInclude[key] === Boolean(activeInclude[key]),
+        )
+      ) {
+        return currentInclude;
+      }
+      return Object.fromEntries(
+        beaconFieldOptions.map(({ key }) => [key, Boolean(activeInclude[key])]),
+      );
+    });
+  }, [
+    activeBeacon.active,
+    activeBeacon.channelIndex,
+    activeBeacon.intervalMinutes,
+    activeBeacon.include?.firmware,
+    activeBeacon.include?.hardware,
+    activeBeacon.include?.id,
+    activeBeacon.include?.name,
+  ]);
+
   const statusClass = useMemo(() => {
     if (self?.connected) {
       return "is-connected";
@@ -220,7 +474,47 @@ export default function App() {
     }
   }
 
-  const node = self?.node;
+  async function startBeaconing() {
+    setBeaconBusy(true);
+    setError("");
+    try {
+      const result = await apiRequest("/beacon/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channelIndex: Number(beaconChannelIndex),
+          intervalMinutes: beaconIntervalMinutes,
+          include: beaconInclude,
+        }),
+      });
+      setSelf(result);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBeaconBusy(false);
+    }
+  }
+
+  async function stopBeaconing() {
+    setBeaconBusy(true);
+    setError("");
+    try {
+      const result = await apiRequest("/beacon/stop", { method: "POST" });
+      setSelf(result);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBeaconBusy(false);
+    }
+  }
+
+  function updateBeaconField(field, enabled) {
+    setBeaconInclude((currentInclude) => ({
+      ...currentInclude,
+      [field]: enabled,
+    }));
+  }
+
   const connected = Boolean(self?.connected);
   const connecting = Boolean(self?.connecting);
   const hasActivePort = Boolean(self?.port);
@@ -345,6 +639,29 @@ export default function App() {
             </p>
           </section>
         )}
+
+        <div className="supporting-grid">
+          <ChannelsPanel
+            channels={node?.channels ?? []}
+            connected={Boolean(self?.connected)}
+          />
+          <BeaconPanel
+            channels={beaconChannels}
+            activeBeacon={activeBeacon}
+            connected={connected}
+            hasNodeInfo={Boolean(node?.myNodeInfo)}
+            channelIndex={beaconChannelIndex}
+            intervalMinutes={beaconIntervalMinutes}
+            include={beaconInclude}
+            busy={beaconBusy}
+            onChannelChange={setBeaconChannelIndex}
+            onIntervalChange={setBeaconIntervalMinutes}
+            onIncludeChange={updateBeaconField}
+            onStart={startBeaconing}
+            onStop={stopBeaconing}
+          />
+          <AdditionalDataPanel />
+        </div>
 
         <footer className="page-footer">
           <span>API</span>

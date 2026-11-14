@@ -16,6 +16,8 @@ const deviceStatuses = {
   6: "configuring",
   7: "configured",
 };
+const beaconIntervals = [1, 5, 15, 30];
+const beaconFieldNames = ["name", "id", "hardware", "firmware"];
 
 class ApiError extends Error {
   constructor(statusCode, message) {
@@ -32,18 +34,37 @@ let nodeState = {
   myNodeInfo: null,
   nodeInfo: null,
   deviceMetadata: null,
+  channels: [],
 };
 const nodeInfoByNumber = new Map();
+let beaconTimer = null;
+let beaconSending = false;
+let beaconState = {
+  active: false,
+  channelIndex: null,
+  intervalMinutes: 1,
+  include: null,
+  startedAt: null,
+  lastSentAt: null,
+  lastMessage: null,
+  lastPacketId: null,
+  lastError: null,
+};
 
 function getSelf() {
-  const hasNodeInfo = nodeState.myNodeInfo !== null;
+  const hasNodeData =
+    nodeState.myNodeInfo !== null ||
+    nodeState.nodeInfo !== null ||
+    nodeState.deviceMetadata !== null ||
+    nodeState.channels.length > 0;
 
   return {
     connected: activeDevice !== null && connectionStatus !== "disconnected",
     connecting,
     port: selectedPort,
     status: connectionStatus,
-    node: hasNodeInfo ? nodeState : null,
+    node: hasNodeData ? nodeState : null,
+    beacon: { ...beaconState, sending: beaconSending },
   };
 }
 
@@ -100,6 +121,9 @@ async function listDevices() {
 function subscribeToDevice(device) {
   device.events.onDeviceStatus.subscribe((status) => {
     connectionStatus = deviceStatuses[status] ?? "unknown";
+    if (status === 2 && beaconState.active) {
+      stopBeaconing("Beaconing stopped because the node disconnected.");
+    }
   });
 
   device.events.onMyNodeInfo.subscribe((info) => {
@@ -117,6 +141,23 @@ function subscribeToDevice(device) {
   device.events.onDeviceMetadataPacket.subscribe((packet) => {
     nodeState.deviceMetadata = packet.data;
   });
+
+  device.events.onChannelPacket.subscribe((channel) => {
+    const settings = channel.settings ?? {};
+    const channelInfo = {
+      index: channel.index,
+      name: settings.name || `Channel ${channel.index}`,
+      role: channel.role,
+      roleName: ["Disabled", "Primary", "Secondary"][channel.role] ?? "Unknown",
+      uplinkEnabled: settings.uplinkEnabled,
+      downlinkEnabled: settings.downlinkEnabled,
+    };
+
+    nodeState.channels = nodeState.channels
+      .filter((currentChannel) => currentChannel.index !== channel.index)
+      .concat(channelInfo)
+      .sort((left, right) => left.index - right.index);
+  });
 }
 
 async function connectToDevice(path) {
@@ -127,7 +168,7 @@ async function connectToDevice(path) {
   connecting = true;
   selectedPort = path;
   connectionStatus = "connecting";
-  nodeState = { myNodeInfo: null, nodeInfo: null, deviceMetadata: null };
+  nodeState = { myNodeInfo: null, nodeInfo: null, deviceMetadata: null, channels: [] };
   nodeInfoByNumber.clear();
 
   let transport = null;
@@ -148,7 +189,7 @@ async function connectToDevice(path) {
     activeDevice = null;
     selectedPort = null;
     connectionStatus = "disconnected";
-    nodeState = { myNodeInfo: null, nodeInfo: null, deviceMetadata: null };
+    nodeState = { myNodeInfo: null, nodeInfo: null, deviceMetadata: null, channels: [] };
     nodeInfoByNumber.clear();
 
     const disconnect = device
@@ -174,6 +215,7 @@ async function disconnectDevice() {
   if (connecting) {
     throw new ApiError(409, "A serial device is still connecting");
   }
+  stopBeaconing();
   if (activeDevice === null) {
     return getSelf();
   }
@@ -191,6 +233,185 @@ async function disconnectDevice() {
   return getSelf();
 }
 
+function beaconField(value, maxLength) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const field = String(value).replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
+  return Array.from(field).slice(0, maxLength).join("") || null;
+}
+
+function limitBeaconBytes(message, maxBytes) {
+  let limitedMessage = "";
+  for (const character of message) {
+    if (Buffer.byteLength(limitedMessage + character, "utf8") > maxBytes) {
+      break;
+    }
+    limitedMessage += character;
+  }
+  return limitedMessage;
+}
+
+function stopBeaconing(lastError = beaconState.lastError) {
+  if (beaconTimer !== null) {
+    clearInterval(beaconTimer);
+    beaconTimer = null;
+  }
+  beaconState = { ...beaconState, active: false, lastError };
+  return beaconState;
+}
+
+function validateBeaconConfig(body) {
+  if (!Number.isInteger(body?.channelIndex)) {
+    throw new ApiError(400, "A channel index must be selected");
+  }
+  if (
+    !Number.isInteger(body?.intervalMinutes) ||
+    !beaconIntervals.includes(body.intervalMinutes)
+  ) {
+    throw new ApiError(400, "Beacon interval must be 1, 5, 15, or 30 minutes");
+  }
+
+  const include = Object.fromEntries(
+    beaconFieldNames.map((fieldName) => [fieldName, body.include?.[fieldName] === true]),
+  );
+  if (!Object.values(include).some(Boolean)) {
+    throw new ApiError(400, "Select at least one node detail to beacon");
+  }
+
+  return {
+    channelIndex: body.channelIndex,
+    intervalMinutes: body.intervalMinutes,
+    include,
+  };
+}
+
+function buildBeaconMessage(include) {
+  const user = nodeState.nodeInfo?.user ?? {};
+  const values = [];
+  if (include.name) {
+    const name = beaconField(user.longName, 36);
+    if (name) values.push(`Name ${name}`);
+  }
+  if (include.id) {
+    const id = beaconField(nodeState.myNodeInfo?.myNodeNum, 16);
+    if (id) values.push(`ID ${id}`);
+  }
+  if (include.hardware) {
+    const hardware = beaconField(user.hwModel, 16);
+    if (hardware) values.push(`HW ${hardware}`);
+  }
+  if (include.firmware) {
+    const firmware = beaconField(nodeState.deviceMetadata?.firmwareVersion, 24);
+    if (firmware) values.push(`FW ${firmware}`);
+  }
+  if (values.length === 0) {
+    throw new ApiError(409, "The selected beacon details are not available yet");
+  }
+
+  return limitBeaconBytes(`Node: ${values.join(" | ")}`, 180);
+}
+
+async function sendBeaconPacket(config) {
+  if (beaconSending) {
+    return null;
+  }
+  if (activeDevice === null || connectionStatus === "disconnected") {
+    throw new ApiError(409, "Connect to a node before beaconing");
+  }
+  if (nodeState.myNodeInfo === null) {
+    throw new ApiError(409, "Node information has not been received yet");
+  }
+  if (!nodeState.channels.some((channel) => (
+    channel.index === config.channelIndex && channel.role !== 0
+  ))) {
+    throw new ApiError(409, "The selected mesh channel is no longer available");
+  }
+
+  const message = buildBeaconMessage(config.include);
+  beaconSending = true;
+  try {
+    const packetId = await activeDevice.sendText(
+      message,
+      "broadcast",
+      false,
+      config.channelIndex,
+    );
+    beaconState = {
+      ...beaconState,
+      lastSentAt: new Date().toISOString(),
+      lastMessage: message,
+      lastPacketId: packetId,
+      lastError: null,
+    };
+    return { message, packetId };
+  } catch (error) {
+    console.error("Failed to send node beacon:", error);
+    throw new ApiError(502, "Failed to send beacon on the selected channel");
+  } finally {
+    beaconSending = false;
+  }
+}
+
+async function sendScheduledBeacon(config) {
+  if (!beaconState.active) {
+    return;
+  }
+  try {
+    await sendBeaconPacket(config);
+  } catch (error) {
+    beaconState = { ...beaconState, lastError: error.message };
+    console.error("Scheduled node beacon failed:", error);
+    if (connectionStatus === "disconnected") {
+      stopBeaconing("Beaconing stopped because the node disconnected.");
+    }
+  }
+}
+
+async function startBeaconing(body) {
+  if (beaconState.active) {
+    throw new ApiError(409, "Beaconing is already active");
+  }
+  if (activeDevice === null || connectionStatus === "disconnected") {
+    throw new ApiError(409, "Connect to a node before beaconing");
+  }
+  if (nodeState.myNodeInfo === null) {
+    throw new ApiError(409, "Node information has not been received yet");
+  }
+
+  const config = validateBeaconConfig(body);
+  if (!nodeState.channels.some((channel) => (
+    channel.index === config.channelIndex && channel.role !== 0
+  ))) {
+    throw new ApiError(400, "Choose an enabled mesh channel");
+  }
+
+  beaconState = {
+    active: true,
+    channelIndex: config.channelIndex,
+    intervalMinutes: config.intervalMinutes,
+    include: config.include,
+    startedAt: new Date().toISOString(),
+    lastSentAt: null,
+    lastMessage: null,
+    lastPacketId: null,
+    lastError: null,
+  };
+
+  try {
+    await sendBeaconPacket(config);
+    beaconTimer = setInterval(
+      () => void sendScheduledBeacon(config),
+      config.intervalMinutes * 60 * 1000,
+    );
+    return getSelf();
+  } catch (error) {
+    stopBeaconing(error.message);
+    throw error;
+  }
+}
+
 async function handleRequest(request, response) {
   applyCors(request, response);
 
@@ -198,6 +419,14 @@ async function handleRequest(request, response) {
     response.writeHead(204);
     response.end();
     return;
+  }
+
+  if (
+    request.method === "POST" &&
+    request.headers.origin &&
+    request.headers.origin !== frontendOrigin
+  ) {
+    throw new ApiError(403, "Origin not allowed");
   }
 
   const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
@@ -223,6 +452,18 @@ async function handleRequest(request, response) {
 
   if (request.method === "POST" && pathname === "/disconnect") {
     sendJson(response, 200, await disconnectDevice());
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/beacon/start") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, await startBeaconing(body));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/beacon/stop") {
+    stopBeaconing();
+    sendJson(response, 200, getSelf());
     return;
   }
 
