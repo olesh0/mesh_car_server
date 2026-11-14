@@ -35,3 +35,10 @@ origin is `http://localhost:5173`.
 Import [`insomnia/mesh-server-api.json`](./insomnia/mesh-server-api.json) into
 Insomnia to use the included API requests. Update `base_url` and `device_path`
 in the Base Environment to match your server and selected serial device.
+
+## Frontend
+
+Start the API with `npm start` in the project root. In a separate terminal, run
+`npm install` and `npm run dev` from the `frontend` directory, then open
+`http://localhost:5173`. The dashboard lists serial devices, lets you connect
+or disconnect, and refreshes node information automatically.
