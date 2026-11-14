@@ -1,0 +1,147 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-11-14T15:05:00.000Z",
+  "__export_source": "insomnia.desktop.app",
+  "resources": [
+    {
+      "_id": "wrk_mesh_server_api",
+      "parentId": null,
+      "modified": 1794668700000,
+      "created": 1794668700000,
+      "name": "Meshtastic Serial API",
+      "description": "Local API for listing serial devices and managing the Meshtastic node connection.",
+      "scope": "collection",
+      "_type": "workspace"
+    },
+    {
+      "_id": "env_mesh_server_base",
+      "parentId": "wrk_mesh_server_api",
+      "modified": 1794668700000,
+      "created": 1794668700000,
+      "name": "Base Environment",
+      "data": {
+        "base_url": "http://127.0.0.1:3000",
+        "device_path": "COM3"
+      },
+      "dataPropertyOrder": {
+        "&": [
+          "base_url",
+          "device_path"
+        ]
+      },
+      "color": null,
+      "isPrivate": false,
+      "metaSortKey": 1,
+      "_type": "environment"
+    },
+    {
+      "_id": "fld_mesh_server_requests",
+      "parentId": "wrk_mesh_server_api",
+      "modified": 1794668700000,
+      "created": 1794668700000,
+      "name": "Meshtastic API",
+      "description": "",
+      "environment": {},
+      "environmentPropertyOrder": null,
+      "metaSortKey": -1794668700000,
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_mesh_server_devices",
+      "parentId": "fld_mesh_server_requests",
+      "modified": 1794668700000,
+      "created": 1794668700000,
+      "url": "{{ _.base_url }}/devices",
+      "name": "List serial devices",
+      "description": "List devices and choose the path to use in Connect to device.",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": -1794668700000,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_mesh_server_connect",
+      "parentId": "fld_mesh_server_requests",
+      "modified": 1794668700000,
+      "created": 1794668700000,
+      "url": "{{ _.base_url }}/connect",
+      "name": "Connect to device",
+      "description": "Select a path returned by List serial devices.",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"path\": \"{{ _.device_path }}\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1794668600000,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_mesh_server_self",
+      "parentId": "fld_mesh_server_requests",
+      "modified": 1794668700000,
+      "created": 1794668700000,
+      "url": "{{ _.base_url }}/self",
+      "name": "Get self",
+      "description": "Get connection state and the latest information received for this node.",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": -1794668500000,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_mesh_server_disconnect",
+      "parentId": "fld_mesh_server_requests",
+      "modified": 1794668700000,
+      "created": 1794668700000,
+      "url": "{{ _.base_url }}/disconnect",
+      "name": "Disconnect",
+      "description": "Disconnect the active serial device.",
+      "method": "POST",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": -1794668400000,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "_type": "request"
+    }
+  ]
+}
